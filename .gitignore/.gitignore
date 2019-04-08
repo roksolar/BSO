@@ -1,4 +1,6 @@
 build/
 firmware/
+/build/
+/firmware/
 ../build/
 ../firmware/
