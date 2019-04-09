@@ -28,7 +28,7 @@
 
 /* You can use http://test.mosquitto.org/ to test mqtt_client instead
  * of setting up your own MQTT server */
-#define MQTT_HOST ("test.mosquitto.org")
+#define MQTT_HOST ("193.2.179.78")
 #define MQTT_PORT 1883
 
 #define MQTT_USER NULL
@@ -38,13 +38,12 @@ const uint8_t scl_pin = 14;
 const uint8_t sda_pin = 12;
 SemaphoreHandle_t wifi_alive;
 QueueHandle_t publish_queue;
-#define PUB_MSG_LEN 18
+#define PUB_MSG_LEN 16
 
 static void  beat_task(void *pvParameters)
 {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     char msg[PUB_MSG_LEN];
-    int count = 0;
 
     //BMP
     bmp280_params_t  params;
@@ -78,14 +77,14 @@ static void  beat_task(void *pvParameters)
 		printf("\n");
 
         printf("Sending to queue.\r\n");
-        snprintf(msg, PUB_MSG_LEN, "Pressure %f\r\n", pressure);
+        snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", pressure);
         if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
             printf("Publish queue overflow.\r\n");
         }
     }
 }
 
-static void  topic_received(mqtt_message_data_t *md)
+/*static void  topic_received(mqtt_message_data_t *md)
 {
     int i;
     mqtt_message_t *message = md->message;
@@ -98,7 +97,7 @@ static void  topic_received(mqtt_message_data_t *md)
         printf("%c", ((char *)(message->payload))[i]);
 
     printf("\r\n");
-}
+}*/
 
 static const char *  get_my_id(void)
 {
@@ -173,7 +172,7 @@ static void  mqtt_task(void *pvParameters)
             continue;
         }
         printf("done\r\n");
-        mqtt_subscribe(&client, "/esptopic", MQTT_QOS1, topic_received);
+        //mqtt_subscribe(&client, "/esptopic", MQTT_QOS1, topic_received);
         xQueueReset(publish_queue);
 
 
@@ -190,7 +189,7 @@ static void  mqtt_task(void *pvParameters)
                 message.dup = 0;
                 message.qos = MQTT_QOS1;
                 message.retained = 0;
-                ret = mqtt_publish(&client, "/beat", &message);
+                ret = mqtt_publish(&client, "/BSO-pressure", &message);
                 if (ret != MQTT_SUCCESS ){
                     printf("error while publishing message: %d\n", ret );
                     break;
