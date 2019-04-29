@@ -28,7 +28,7 @@
 
 /* You can use http://test.mosquitto.org/ to test mqtt_client instead
  * of setting up your own MQTT server */
-#define MQTT_HOST ("193.2.179.78")
+#define MQTT_HOST ("109.182.146.79")
 #define MQTT_PORT 1883
 
 #define MQTT_USER NULL
@@ -40,64 +40,60 @@ SemaphoreHandle_t wifi_alive;
 QueueHandle_t publish_queue;
 #define PUB_MSG_LEN 16
 
+static float get_pressure(bmp280_t bmp280_dev)
+{
+    float pressure, temperature, humidity;
+    if (!bmp280_read_float(&bmp280_dev, &temperature, &pressure, &humidity)) {
+	printf("Temperature/pressure reading failed\n");
+	return -1.0;
+    }
+    printf("Pressure: %.2f Pa, Temperature: %.2f C\n", pressure, temperature);
+    return pressure;
+}
+
 static void  beat_task(void *pvParameters)
 {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     char msg[PUB_MSG_LEN];
 
-    //BMP
+    // Init BMP parameters
     bmp280_params_t  params;
-    float pressure, temperature, humidity;
+    float pressure;
 
     bmp280_init_default_params(&params);
 
     bmp280_t bmp280_dev;
     bmp280_dev.i2c_dev.bus = i2c_bus;
     bmp280_dev.i2c_dev.addr = BMP280_I2C_ADDRESS_0;
-    //BMP INIT
-    while (!bmp280_init(&bmp280_dev, &params)) {
-        printf("BMP280 initialization failed\n");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
 
+    while (1){
+	// Init BMP task
+        while (!bmp280_init(&bmp280_dev, &params)) {
+            printf("BMP280 initialization failed\n");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
         bool bme280p = bmp280_dev.id == BME280_CHIP_ID;
         printf("BMP280: found %s\n", bme280p ? "BME280" : "BMP280");
-    //---------------------------------------
-    while (1) {
-        vTaskDelayUntil(&xLastWakeTime, 10000 / portTICK_PERIOD_MS);
-	    // READ BMP
-	    if (!bmp280_read_float(&bmp280_dev, &temperature, &pressure, &humidity)) {
-		printf("Temperature/pressure reading failed\n");
+  	//---------------------------------------
+	while (1) {
+	    // Pressure reading task
+	    // Delay task
+	    vTaskDelayUntil(&xLastWakeTime, 10000 / portTICK_PERIOD_MS);
+	    // Get pressure
+	    pressure = get_pressure(bmp280_dev);
+	    // Check for error
+	    if (pressure == -1.0){
 		break;
 	    }
-	    printf("Pressure: %.2f Pa, Temperature: %.2f C", pressure, temperature);
-	    if (bme280p)
-		printf(", Humidity: %.2f\n", humidity);
-	    else
-		printf("\n");
-
-        printf("Sending to queue.\r\n");
-        snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", pressure);
-        if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
-            printf("Publish queue overflow.\r\n");
-        }
+	    // Send value to queue.
+	    printf("Sending to queue.\r\n");
+	    snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", pressure);
+	    if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
+	        printf("Publish queue overflow.\r\n");
+	    }
+	}
     }
 }
-
-/*static void  topic_received(mqtt_message_data_t *md)
-{
-    int i;
-    mqtt_message_t *message = md->message;
-    printf("Received: ");
-    for( i = 0; i < md->topic->lenstring.len; ++i)
-        printf("%c", md->topic->lenstring.data[ i ]);
-
-    printf(" = ");
-    for( i = 0; i < (int)message->payloadlen; ++i)
-        printf("%c", ((char *)(message->payload))[i]);
-
-    printf("\r\n");
-}*/
 
 static const char *  get_my_id(void)
 {
@@ -126,8 +122,6 @@ static const char *  get_my_id(void)
 
 static void  mqtt_task(void *pvParameters)
 {
-
-
     int ret         = 0;
     struct mqtt_network network;
     mqtt_client_t client   = mqtt_client_default;
@@ -172,14 +166,11 @@ static void  mqtt_task(void *pvParameters)
             continue;
         }
         printf("done\r\n");
-        //mqtt_subscribe(&client, "/esptopic", MQTT_QOS1, topic_received);
         xQueueReset(publish_queue);
 
-
         while(1){
-
-
             char msg[PUB_MSG_LEN - 1] = "\0";
+	    // Wait for message
             while(xQueueReceive(publish_queue, (void *)msg, 0) ==
                   pdTRUE){
                 printf("got message to publish\r\n");
@@ -189,7 +180,8 @@ static void  mqtt_task(void *pvParameters)
                 message.dup = 0;
                 message.qos = MQTT_QOS1;
                 message.retained = 0;
-                ret = mqtt_publish(&client, "/BSO-pressure", &message);
+		// Publish message
+                ret = mqtt_publish(&client, "/BSO-1", &message);
                 if (ret != MQTT_SUCCESS ){
                     printf("error while publishing message: %d\n", ret );
                     break;
@@ -256,12 +248,10 @@ static void  wifi_task(void *pvParameters)
 void user_init(void)
 {
     uart_set_baud(0, 115200);
-    printf("SDK version:%s\n", sdk_system_get_sdk_version());
-	i2c_init(i2c_bus, scl_pin, sda_pin, I2C_FREQ_400K);
-
+    i2c_init(i2c_bus, scl_pin, sda_pin, I2C_FREQ_400K);
     vSemaphoreCreateBinary(wifi_alive);
     publish_queue = xQueueCreate(3, PUB_MSG_LEN);
     xTaskCreate(&wifi_task, "wifi_task",  256, NULL, 2, NULL);
-    xTaskCreate(&beat_task, "beat_task", 256, NULL, 3, NULL);
+    xTaskCreate(&beat_task, "beat_task", 1024, NULL, 3, NULL);
     xTaskCreate(&mqtt_task, "mqtt_task", 1024, NULL, 4, NULL);
 }
