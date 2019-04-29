@@ -4,3 +4,4 @@ firmware/
 /firmware/
 ../build/
 ../firmware/
+.idea/
