@@ -3,10 +3,13 @@
 #include <i2c/i2c.h>
 #include <bmp280/bmp280.h>
 #include <string.h>
-
+#define button1		0x20
+#define PCF_ADDRESS	0x38
+#define button2		0x10
 #include <FreeRTOS.h>
 #include <task.h>
 #include <ssid_config.h>
+
 
 #include <espressif/esp_sta.h>
 #include <espressif/esp_wifi.h>
@@ -30,6 +33,7 @@
 #define MQTT_USER "test"
 #define MQTT_PASS "bso"
 
+static TaskHandle_t task1_handle;
 const uint8_t i2c_bus = 0;
 const uint8_t scl_pin = 14;
 const uint8_t sda_pin = 12;
@@ -40,25 +44,34 @@ QueueHandle_t publish_queue;
 
 bmp280_t bmp280_dev;
 
-static float get_pressure()
-{
-	float pressure, temperature, humidity;
-	if (!bmp280_read_float(&bmp280_dev, &temperature, &pressure, &humidity)) {
-		printf("Temperature/pressure reading failed\n");
-		return -1.0;
-	}
-	printf("Pressure: %.2f Pa  \n\r", pressure);
-	return pressure;
+bool i2c_init_bmp(){
+	return(i2c_init(i2c_bus, scl_pin, sda_pin, I2C_FREQ_400K));
+}
+bool i2c_init_button(){
+	return (i2c_init(i2c_bus, scl_pin, sda_pin, I2C_FREQ_100K));
 }
 
 static bool init_bmp(){
-
+	
+	while(!i2c_init_bmp()){}
 	bmp280_params_t params;
     	bmp280_init_default_params(&params);
 	bmp280_dev.i2c_dev.bus = i2c_bus;
 	bmp280_dev.i2c_dev.addr = BMP280_I2C_ADDRESS_0;
 	return (bmp280_init(&bmp280_dev, &params));
 }
+
+static float get_pressure()
+{
+	float pressure, temperature, humidity;
+	if (!bmp280_read_float(&bmp280_dev, &temperature, &pressure, &humidity)) {
+		printf("Temperature reading failed\n");
+		return -1.0;
+	}
+	return pressure;
+}
+
+
 
 
 static void  beat_task(void *pvParameters)
@@ -67,11 +80,6 @@ static void  beat_task(void *pvParameters)
 	char msg[PUB_MSG_LEN];
 
 	float pressure;
-
-	while(!init_bmp()){
-		printf("BMP280 initialization failed\n");
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
-	}
 
 	int index = 0;
 	float sum = 0;
@@ -85,7 +93,7 @@ static void  beat_task(void *pvParameters)
 		sum = sum + pressure;
 		index = index + 1;
 		if(index == 10){
-
+			printf("Average pressure: %.2f Pa  \n\r",(sum/index));
 			snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", (sum/index));
 			if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
 				printf("Publish queue overflow.\r\n");
@@ -121,6 +129,43 @@ static const char *  get_my_id(void)
     my_id_done = true;
     return my_id;
 }
+// check for pressed button
+void button(void *pvParameters) {
+	uint8_t pcf_byte;
+	char msg[PUB_MSG_LEN];
+	float pressure;
+	bool run = true;
+	while (1) {
+
+		i2c_slave_read(i2c_bus, PCF_ADDRESS, NULL, &pcf_byte, 1);
+		
+		if ((pcf_byte & button1) == 0){
+			printf("Button 1 is pressed\n\r");
+			pressure = get_pressure(bmp280_dev);
+			snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", pressure);
+			if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
+				printf("Publish queue overflow.\r\n");
+			}
+		
+		}
+		if ((pcf_byte & button2) == 0){
+			if(run){
+				printf("Button 2 is pressed.. pausing\n\r");	
+				vTaskSuspend(task1_handle);
+				run = false;
+			}else{
+				printf("Button 2 is pressed.. resuming\n\r");
+				xQueueReset(publish_queue);
+				vTaskResume(task1_handle);
+				run = true;
+			}
+		
+		}
+		vTaskDelay(pdMS_TO_TICKS(200));
+	}
+}
+
+
 
 static void  mqtt_task(void *pvParameters)
 {
@@ -249,11 +294,17 @@ static void  wifi_task(void *pvParameters)
 
 void user_init(void)
 {
+
+    while(!init_bmp()){
+		printf("BMP280 initialization failed\n");
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+    task1_handle = NULL;
     uart_set_baud(0, 115200);
-    i2c_init(i2c_bus, scl_pin, sda_pin, I2C_FREQ_400K);
     vSemaphoreCreateBinary(wifi_alive);
     publish_queue = xQueueCreate(3, PUB_MSG_LEN);
     xTaskCreate(&wifi_task, "wifi_task",  256, NULL, 2, NULL);
-    xTaskCreate(&beat_task, "beat_task", 1024, NULL, 3, NULL);
+    xTaskCreate(beat_task, "beat_task", 1024, NULL, 3, &task1_handle);
     xTaskCreate(&mqtt_task, "mqtt_task", 1024, NULL, 4, NULL);
+    xTaskCreate(&button, "button", 1024, NULL, 5, NULL);
 }
