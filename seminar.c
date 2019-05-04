@@ -24,75 +24,77 @@
 #include <FreeRTOS.h>
 #include <task.h>
 
-
-
-/* You can use http://test.mosquitto.org/ to test mqtt_client instead
- * of setting up your own MQTT server */
-#define MQTT_HOST ("109.182.146.79")
+#define MQTT_HOST ("192.168.1.2")
 #define MQTT_PORT 1883
 
-#define MQTT_USER NULL
-#define MQTT_PASS NULL
+#define MQTT_USER "test"
+#define MQTT_PASS "bso"
+
 const uint8_t i2c_bus = 0;
 const uint8_t scl_pin = 14;
 const uint8_t sda_pin = 12;
+
 SemaphoreHandle_t wifi_alive;
 QueueHandle_t publish_queue;
 #define PUB_MSG_LEN 16
 
-static float get_pressure(bmp280_t bmp280_dev)
+bmp280_t bmp280_dev;
+
+static float get_pressure()
 {
-    float pressure, temperature, humidity;
-    if (!bmp280_read_float(&bmp280_dev, &temperature, &pressure, &humidity)) {
-	printf("Temperature/pressure reading failed\n");
-	return -1.0;
-    }
-    printf("Pressure: %.2f Pa, Temperature: %.2f C\n", pressure, temperature);
-    return pressure;
+	float pressure, temperature, humidity;
+	if (!bmp280_read_float(&bmp280_dev, &temperature, &pressure, &humidity)) {
+		printf("Temperature/pressure reading failed\n");
+		return -1.0;
+	}
+	printf("Pressure: %.2f Pa  \n\r", pressure);
+	return pressure;
 }
+
+static bool init_bmp(){
+
+	bmp280_params_t params;
+    	bmp280_init_default_params(&params);
+	bmp280_dev.i2c_dev.bus = i2c_bus;
+	bmp280_dev.i2c_dev.addr = BMP280_I2C_ADDRESS_0;
+	return (bmp280_init(&bmp280_dev, &params));
+}
+
 
 static void  beat_task(void *pvParameters)
 {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    char msg[PUB_MSG_LEN];
+	TickType_t xLastWakeTime = xTaskGetTickCount();
+	char msg[PUB_MSG_LEN];
 
-    // Init BMP parameters
-    bmp280_params_t  params;
-    float pressure;
+	float pressure;
 
-    bmp280_init_default_params(&params);
-
-    bmp280_t bmp280_dev;
-    bmp280_dev.i2c_dev.bus = i2c_bus;
-    bmp280_dev.i2c_dev.addr = BMP280_I2C_ADDRESS_0;
-
-    while (1){
-	// Init BMP task
-        while (!bmp280_init(&bmp280_dev, &params)) {
-            printf("BMP280 initialization failed\n");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-        bool bme280p = bmp280_dev.id == BME280_CHIP_ID;
-        printf("BMP280: found %s\n", bme280p ? "BME280" : "BMP280");
-  	//---------------------------------------
-	while (1) {
-	    // Pressure reading task
-	    // Delay task
-	    vTaskDelayUntil(&xLastWakeTime, 10000 / portTICK_PERIOD_MS);
-	    // Get pressure
-	    pressure = get_pressure(bmp280_dev);
-	    // Check for error
-	    if (pressure == -1.0){
-		break;
-	    }
-	    // Send value to queue.
-	    printf("Sending to queue.\r\n");
-	    snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", pressure);
-	    if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
-	        printf("Publish queue overflow.\r\n");
-	    }
+	while(!init_bmp()){
+		printf("BMP280 initialization failed\n");
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	}
-    }
+
+	int index = 0;
+	float sum = 0;
+	while (1) {
+		vTaskDelayUntil(&xLastWakeTime, 1000 / portTICK_PERIOD_MS);
+		pressure = get_pressure(bmp280_dev);
+
+		if (pressure == -1.0){
+			break;
+		}
+		sum = sum + pressure;
+		index = index + 1;
+		if(index == 10){
+
+			snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", (sum/index));
+			if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
+				printf("Publish queue overflow.\r\n");
+			}
+			  
+			sum = 0;
+			index = 0;   
+		}
+	}
 }
 
 static const char *  get_my_id(void)
