@@ -33,7 +33,7 @@ def on_message(client, userdata, message):
 #broker_address="localhost"
 broker_address="test.mosquitto.org"
 print("creating new instance")
-client = mqtt.Client("1479") #create new instance
+client = mqtt.Client("147911") #create new instance
 #client.username_pw_set("test","bso123")
 client.on_message=on_message #attach function to callback
 print("connecting to broker")
