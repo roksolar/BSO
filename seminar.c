@@ -27,11 +27,11 @@
 #include <FreeRTOS.h>
 #include <task.h>
 
-#define MQTT_HOST ("192.168.1.2")
+#define MQTT_HOST ("test.mosquitto.org")
 #define MQTT_PORT 1883
 
-#define MQTT_USER "test"
-#define MQTT_PASS "bso"
+#define MQTT_USER NULL
+#define MQTT_PASS NULL
 
 static TaskHandle_t task1_handle;
 const uint8_t i2c_bus = 0;
@@ -76,7 +76,7 @@ static float get_pressure()
 
 static void  beat_task(void *pvParameters)
 {
-	TickType_t xLastWakeTime = xTaskGetTickCount();
+	
 	char msg[PUB_MSG_LEN];
 
 	float pressure;
@@ -84,9 +84,9 @@ static void  beat_task(void *pvParameters)
 	int index = 0;
 	float sum = 0;
 	while (1) {
+		TickType_t xLastWakeTime = xTaskGetTickCount();
 		vTaskDelayUntil(&xLastWakeTime, 1000 / portTICK_PERIOD_MS);
 		pressure = get_pressure(bmp280_dev);
-
 		if (pressure == -1.0){
 			break;
 		}
@@ -142,6 +142,7 @@ void button(void *pvParameters) {
 		if ((pcf_byte & button1) == 0){
 			printf("Button 1 is pressed\n\r");
 			pressure = get_pressure(bmp280_dev);
+			printf("Pressure: %.2f Pa  \n\r",pressure);
 			snprintf(msg, PUB_MSG_LEN, "%f\r\n\0", pressure);
 			if (xQueueSend(publish_queue, (void *)msg, 0) == pdFALSE) {
 				printf("Publish queue overflow.\r\n");
@@ -228,7 +229,7 @@ static void  mqtt_task(void *pvParameters)
                 message.qos = MQTT_QOS1;
                 message.retained = 0;
 		// Publish message
-                ret = mqtt_publish(&client, "/BSO-1", &message);
+                ret = mqtt_publish(&client, "/BSO-2", &message);
                 if (ret != MQTT_SUCCESS ){
                     printf("error while publishing message: %d\n", ret );
                     break;
