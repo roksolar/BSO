@@ -9,8 +9,3 @@
 
 #define WIFI_SSID "Guest FRIFKKT"
 #define WIFI_PASS "kcavAPDZz7"
-
-#define WIFI_SSID "ananas"
-#define WIFI_PASS "zabrajda60"
-
-
