@@ -229,7 +229,7 @@ static void  mqtt_task(void *pvParameters)
                 message.qos = MQTT_QOS1;
                 message.retained = 0;
 		// Publish message
-                ret = mqtt_publish(&client, "/BSO-1", &message);
+                ret = mqtt_publish(&client, "/BSO-2", &message);
                 if (ret != MQTT_SUCCESS ){
                     printf("error while publishing message: %d\n", ret );
                     break;
